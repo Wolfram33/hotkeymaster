@@ -31,7 +31,7 @@ $buildDir = Join-Path ([IO.Path]::GetTempPath()) 'hotkey-master-build'
 python -m nuitka --standalone --output-dir="$buildDir" --assume-yes-for-downloads `
     --enable-plugin=pyqt6 --windows-console-mode=disable `
     --windows-icon-from-ico=icon.ico --include-data-file=icon.ico=icon.ico `
-    --include-module=win32api --include-module=win32con --include-module=pynput `
+    --include-module=win32api --include-module=win32con --include-module=win32crypt --include-module=pynput `
     --product-name='Hotkey-Master' --product-version=$version --file-version=$version `
     --file-description='Hotkey-Master - systemweite Tastenkuerzel' `
     --company-name='Wolfram Consult GmbH & Co. KG' `

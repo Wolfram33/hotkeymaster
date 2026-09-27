@@ -35,6 +35,7 @@
 - Tastenkombinationen werden bequem auf einer **Bildschirm-Tastatur** zusammengeklickt.
 - Ungeeignete Kombinationen (z. B. nur „A“) werden mit Begründung abgelehnt.
 - Einträge lassen sich jederzeit **bearbeiten** (Doppelklick) und **löschen** (mit Rückfrage).
+- Texte – auch Passwörter – werden **verschlüsselt gespeichert** und beim Bearbeiten erst auf Wunsch angezeigt.
 - Keine Internetverbindung, kein Konto, keine Telemetrie.
 
 ## Installation
@@ -80,6 +81,18 @@ Der komplette Quellcode liegt offen in diesem Repository.
 - Text und gesendete Tasten starten erst, wenn Strg/Alt/Umschalt/Win losgelassen sind.
 - In Programmen, die als Administrator laufen, wirken Hotkeys nur, wenn auch Hotkey-Master als Administrator läuft.
 - Die Hotkeys liegen in `%USERPROFILE%\.productivity_hub\config.json`.
+
+### Wie sicher sind gespeicherte Passwörter?
+
+Texte werden mit **Windows-DPAPI** verschlüsselt – demselben Verfahren, mit dem Windows z. B. WLAN-Passwörter schützt.
+Lesen kann sie nur dein Windows-Konto auf diesem PC. Backups, kopierte Konfigurationsdateien, andere Benutzerkonten
+oder ein ausgebauter Datenträger sehen nur Zeichensalat. Texte aus älteren Versionen werden beim ersten Start
+automatisch verschlüsselt.
+
+- **Umzug auf einen neuen PC** oder Windows-Neuinstallation: Die Texte lassen sich dort nicht entschlüsseln.
+  Die betroffenen Hotkeys werden in der Liste markiert – Text über „Bearbeiten“ einfach neu eingeben.
+- **Grenze:** Schadsoftware, die unter deinem Konto läuft, kann getippte Passwörter immer mitlesen – das gilt für
+  jede Art der Eingabe, auch von Hand. Dagegen hilft nur ein sauberes System.
 - Alle Details stehen im Reiter **Info** im Programm.
 
 ## Selbst bauen

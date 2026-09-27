@@ -9,6 +9,8 @@ Tastenkombination senden.
 Autor: Rob de Roy
 """
 
+import base64
+import binascii
 import json
 import logging
 import os
@@ -28,11 +30,13 @@ from PyQt6.QtWidgets import (QApplication, QDialog, QFileDialog, QGridLayout,
 # Pyright/Pylance cannot resolve the external pynput package in some IDE setups.
 # pyright: reportMissingModuleSource=false
 from pynput import keyboard as pynput_keyboard
+import pywintypes
 import win32api
 import win32con
+import win32crypt
 
 APP_NAME = 'Hotkey-Master'
-APP_VERSION = '1.6.2'
+APP_VERSION = '1.7.0'
 APP_AUTHOR = 'Rob de Roy'
 
 log = logging.getLogger('hotkey-master')
@@ -155,8 +159,8 @@ ACTIONS = {
         'name': 'Text eingeben',
         'field': 'Te&xt:',
         'placeholder': 'Text, der getippt wird – z. B. name@firma.de',
-        'hint': 'Wird Zeichen für Zeichen getippt. Der Text erscheint aus '
-                'Datenschutzgründen nicht in der Liste.',
+        'hint': 'Wird Zeichen für Zeichen getippt. Der Text wird verschlüsselt gespeichert '
+                'und erscheint nicht in der Liste – auch Passwörter sind möglich.',
         'missing': 'Bitte den Text eingeben, der getippt werden soll.',
     },
     'open_program': {
@@ -329,14 +333,52 @@ class HotkeyListener:
         return (key.value if isinstance(key, pynput_keyboard.Key) else key).vk
 
 
+# --- Verschlüsselung (Windows-DPAPI) -----------------------------------------
+# Texte können Passwörter sein. DPAPI bindet die Verschlüsselung an das
+# Windows-Konto: Nur dieses Konto auf diesem PC kann sie wieder lesen –
+# Kopien der Konfiguration (Backup, Datenträger, andere Konten) nicht.
+
+_DPAPI_ENTROPY = b'Hotkey-Master'
+_CRYPTPROTECT_UI_FORBIDDEN = 0x1
+
+
+def protect_text(text):
+    """Verschlüsselt Text für das aktuelle Windows-Konto (Base64). Wirft OSError."""
+    try:
+        blob = win32crypt.CryptProtectData(text.encode('utf-8'), APP_NAME, _DPAPI_ENTROPY,
+                                           None, None, _CRYPTPROTECT_UI_FORBIDDEN)
+    except pywintypes.error as exc:
+        raise OSError(f'Verschlüsseln fehlgeschlagen: {exc.strerror}') from exc
+    return base64.b64encode(blob).decode('ascii')
+
+
+def unprotect_text(token):
+    """Gegenstück zu protect_text. ValueError, wenn nicht entschlüsselbar
+    (anderes Windows-Konto, anderer PC, Windows neu installiert, Datei beschädigt)."""
+    try:
+        _, data = win32crypt.CryptUnprotectData(base64.b64decode(token, validate=True),
+                                                _DPAPI_ENTROPY, None, None,
+                                                _CRYPTPROTECT_UI_FORBIDDEN)
+        return data.decode('utf-8')
+    except (pywintypes.error, binascii.Error, UnicodeDecodeError, TypeError) as exc:
+        raise ValueError('Text nicht entschlüsselbar') from exc
+
+
 # --- Konfiguration -----------------------------------------------------------
 
 class ConfigManager:
-    """Liest und schreibt die Hotkeys (Pfad aus Kompatibilität zu 1.4.x unverändert)."""
+    """Liest und schreibt die Hotkeys (Pfad aus Kompatibilität zu 1.4.x unverändert).
+
+    Texte von „Text eingeben“ stehen verschlüsselt als 'param_protected' in der
+    Datei. Im Speicher hat jede Aktion 'param'; bei nicht entschlüsselbarem Text
+    ist 'param' None und 'protected' hält den Originalwert, damit er beim
+    Speichern unverändert erhalten bleibt.
+    """
 
     def __init__(self, path=None):
         self.path = Path(path) if path else Path.home() / '.productivity_hub' / 'config.json'
         self.load_warning = ''
+        self.needs_migration = False  # Klartext-Texte aus älteren Versionen gefunden
         self._data = {}      # übrige Felder der Datei bleiben beim Speichern erhalten
         self._invalid = {}   # unlesbare Einträge nicht stillschweigend verwerfen
         self.hotkeys = self._load()
@@ -361,27 +403,61 @@ class ConfigManager:
 
         self._data = data if isinstance(data, dict) else {}
         raw = self._data.get('hotkeys')
-        hotkeys = {}
+        hotkeys, unreadable = {}, []
         for combo, entry in (raw.items() if isinstance(raw, dict) else ()):
             try:
-                action = entry['action']
-                hotkeys[validate_trigger(combo)] = {
-                    'action': {'type': action['type'],
-                               'param': validate_action(action['type'], action['param'])},
-                    'description': str(entry.get('description', '')),
-                }
+                trigger = validate_trigger(combo)
+                action = self._load_action(entry['action'])
+                if action['param'] is None:
+                    unreadable.append(format_combo(trigger))
+                hotkeys[trigger] = {'action': action,
+                                    'description': str(entry.get('description', ''))}
             except (ValueError, KeyError, TypeError, AttributeError):
                 self._invalid[combo] = entry
+
+        warnings = []
         if self._invalid:
-            self.load_warning = (f'{len(self._invalid)} Eintrag/Einträge in „{self.path}“ '
-                                 f'sind ungültig und bleiben inaktiv: {", ".join(self._invalid)}. '
-                                 'Bitte neu anlegen oder in der Datei korrigieren.')
+            warnings.append(f'{len(self._invalid)} Eintrag/Einträge in „{self.path}“ sind ungültig '
+                            f'und bleiben inaktiv: {", ".join(self._invalid)}. '
+                            'Bitte neu anlegen oder in der Datei korrigieren.')
+        if unreadable:
+            warnings.append(f'Der Text von {len(unreadable)} Hotkey(s) lässt sich auf diesem PC nicht '
+                            f'entschlüsseln: {", ".join(unreadable)}. Texte sind an das Windows-Konto '
+                            'gebunden, auf dem sie gespeichert wurden (z. B. nach Umzug auf einen '
+                            'neuen PC). Bitte den Hotkey über „Bearbeiten“ öffnen und den Text neu eingeben.')
+        self.load_warning = '\n\n'.join(warnings)
         return hotkeys
+
+    def _load_action(self, action):
+        action_type = action['type']
+        if action_type == 'type_text' and 'param_protected' in action:
+            token = action['param_protected']
+            if not isinstance(token, str):
+                raise ValueError('param_protected ist kein Text')
+            try:
+                return {'type': action_type,
+                        'param': validate_action(action_type, unprotect_text(token))}
+            except ValueError:
+                return {'type': action_type, 'param': None, 'protected': token}
+        if action_type == 'type_text':
+            self.needs_migration = True  # Klartext aus Version ≤ 1.6 – beim Speichern verschlüsseln
+        return {'type': action_type, 'param': validate_action(action_type, action['param'])}
+
+    @staticmethod
+    def _serialize(entry):
+        action = entry['action']
+        if action['type'] == 'type_text':
+            token = action['protected'] if action['param'] is None else protect_text(action['param'])
+            stored = {'type': 'type_text', 'param_protected': token}
+        else:
+            stored = {'type': action['type'], 'param': action['param']}
+        return {'action': stored, 'description': entry['description']}
 
     def save(self):
         """Schreibt atomar (erst Temp-Datei, dann ersetzen). Wirft OSError."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        data = {**self._data, 'hotkeys': {**self._invalid, **self.hotkeys}}
+        hotkeys = {combo: self._serialize(entry) for combo, entry in self.hotkeys.items()}
+        data = {**self._data, 'hotkeys': {**self._invalid, **hotkeys}}
         tmp = self.path.with_name(self.path.name + '.tmp')
         with open(tmp, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
@@ -534,6 +610,11 @@ class MainWindow(QMainWindow):
         self._refresh()
         self.listener.start()
 
+        # Klartext-Texte aus Version ≤ 1.6 sofort verschlüsselt speichern
+        if self.config.needs_migration and self._persist():
+            self.config.needs_migration = False
+            self.statusBar().showMessage('Gespeicherte Texte sind jetzt verschlüsselt.', 8000)
+
         if self.config.load_warning:
             QMessageBox.warning(self, 'Konfiguration', self.config.load_warning)
 
@@ -596,7 +677,11 @@ class MainWindow(QMainWindow):
         self.param_input = QLineEdit()
         self.browse_btn = styled_button('Durchsuchen …', 'select', 'Programm oder Datei auswählen')
         self.browse_btn.clicked.connect(self._browse_program)
-        self.param_label = self._add_form_row(form, 2, '', self.param_input, self.browse_btn)
+        self.reveal_btn = styled_button('', 'select')
+        self.reveal_btn.setCheckable(True)
+        self.reveal_btn.toggled.connect(self._show_text)
+        self.param_label = self._add_form_row(form, 2, '', self.param_input,
+                                              self.browse_btn, self.reveal_btn)
         self.param_hint = QLabel()
         self.param_hint.setObjectName('hint')
         self.param_hint.setWordWrap(True)
@@ -621,19 +706,20 @@ class MainWindow(QMainWindow):
         return widget
 
     @staticmethod
-    def _add_form_row(grid, row, label_text, field, extra=None):
+    def _add_form_row(grid, row, label_text, field, *extras):
         label = QLabel(label_text)
         label.setBuddy(field)  # verknüpft Beschriftung und Feld (Screenreader, Alt+Buchstabe)
         field.setAccessibleName(label_text.replace('&', '').rstrip(':'))
         grid.addWidget(label, row, 0)
-        if extra is None:
+        if not extras:
             grid.addWidget(field, row, 1)
         else:
-            # Feld und Zusatz-Button teilen sich eine Zelle; ist der Button
-            # ausgeblendet, nimmt das Feld die volle Breite ein
+            # Feld und Zusatz-Buttons teilen sich eine Zelle; ausgeblendete
+            # Buttons überlassen dem Feld die volle Breite
             cell = QHBoxLayout()
             cell.addWidget(field, stretch=1)
-            cell.addWidget(extra)
+            for extra in extras:
+                cell.addWidget(extra)
             grid.addLayout(cell, row, 1)
         return label
 
@@ -701,6 +787,12 @@ class MainWindow(QMainWindow):
           <li>In Fenstern, die als Administrator laufen, greifen Hotkeys nur,
               wenn auch {APP_NAME} als Administrator gestartet wurde.</li>
           <li>Gespeichert wird in <code>{self.config.path}</code>.</li>
+          <li><b>Texte werden verschlüsselt gespeichert</b> (Windows-DPAPI): Lesen kann sie nur
+              dein Windows-Konto auf diesem PC – Backups, Kopien der Datei oder andere Konten nicht.
+              Nach einem Umzug auf einen anderen PC oder einer Windows-Neuinstallation müssen
+              Texte deshalb neu eingegeben werden; betroffene Hotkeys sind in der Liste markiert.</li>
+          <li>Beim Bearbeiten sind gespeicherte Texte verborgen (●●●) –
+              „Anzeigen“ neben dem Feld deckt sie auf.</li>
         </ul>
         """)
         return info
@@ -713,7 +805,12 @@ class MainWindow(QMainWindow):
             action = entry['action']
             label = ACTIONS[action['type']]['name']
             # Text-Inhalte nicht anzeigen – es können Passwörter sein
-            detail = '' if action['type'] == 'type_text' else f': {action["param"]}'
+            if action['type'] != 'type_text':
+                detail = f': {action["param"]}'
+            elif action['param'] is None:
+                detail = '   ⚠ Text auf diesem PC nicht lesbar – bitte bearbeiten'
+            else:
+                detail = ''
             text = f'{format_combo(combo)}   →   {label}{detail}'
             if entry['description']:
                 text += f'   ({entry["description"]})'
@@ -745,7 +842,13 @@ class MainWindow(QMainWindow):
         self._editing = combo
         self._set_combo(combo)
         self.action_combo.setCurrentIndex(self.action_combo.findData(entry['action']['type']))
-        self.param_input.setText(entry['action']['param'])
+        param = entry['action']['param']
+        self.param_input.setText(param or '')
+        if param is None:
+            self.param_input.setPlaceholderText('Gespeicherter Text ist auf diesem PC nicht lesbar – '
+                                                'bitte neu eingeben')
+        # Gespeicherte Texte können Passwörter sein: erst auf Wunsch zeigen
+        self._set_text_visible(False)
         self.desc_input.setText(entry['description'])
         self._update_form_mode()
         self.param_input.setFocus()
@@ -779,6 +882,7 @@ class MainWindow(QMainWindow):
         self.param_input.clear()
         self.desc_input.clear()
         self.action_combo.setCurrentIndex(0)
+        self._set_text_visible(True)  # neuer Text: sichtbar tippen, verbergen auf Wunsch
         self._update_param_input()
         self._update_form_mode()
 
@@ -792,11 +896,27 @@ class MainWindow(QMainWindow):
     def _update_param_input(self):
         action_type = self.action_combo.currentData()
         action = ACTIONS[action_type]
+        is_text = action_type == 'type_text'
         self.browse_btn.setVisible(action_type == 'open_program')
+        self.reveal_btn.setVisible(is_text)
+        # Verbergen gilt nur für Texte; Pfade und Tasten bleiben lesbar
+        self._show_text(self.reveal_btn.isChecked() or not is_text)
         self.param_label.setText(action['field'])
         self.param_input.setAccessibleName(action['field'].replace('&', '').rstrip(':'))
         self.param_input.setPlaceholderText(action['placeholder'])
         self.param_hint.setText(action['hint'])
+
+    def _set_text_visible(self, visible):
+        self.reveal_btn.setChecked(visible)
+        self._show_text(visible)  # auch wenn sich der Zustand nicht geändert hat
+
+    def _show_text(self, visible):
+        self.param_input.setEchoMode(QLineEdit.EchoMode.Normal if visible
+                                     else QLineEdit.EchoMode.Password)
+        self.reveal_btn.setText('👁 Verbergen' if visible else '👁 Anzeigen')
+        self.reveal_btn.setAccessibleName('Text verbergen' if visible else 'Text anzeigen')
+        self.reveal_btn.setToolTip('Text durch Punkte ersetzen, z. B. bei Passwörtern' if visible
+                                   else 'Gespeicherten Text im Klartext anzeigen')
 
     def _open_virtual_keyboard(self):
         dialog = VirtualKeyboard(self, preset=self._combo)
@@ -857,8 +977,13 @@ class MainWindow(QMainWindow):
 
     def _on_trigger(self, combo):
         entry = self.config.hotkeys.get(combo)
-        if entry:
-            self.runner.submit(combo, dict(entry['action']))
+        if not entry:
+            return
+        if entry['action']['param'] is None:
+            self._on_action_failed(f'Hotkey {format_combo(combo)}: Der gespeicherte Text ist auf diesem '
+                                   'PC nicht lesbar – über „Bearbeiten“ neu eingeben.')
+            return
+        self.runner.submit(combo, dict(entry['action']))
 
     def _on_action_failed(self, message):
         self.statusBar().showMessage(message, 10000)
