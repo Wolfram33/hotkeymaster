@@ -32,7 +32,7 @@ import win32api
 import win32con
 
 APP_NAME = 'Hotkey-Master'
-APP_VERSION = '1.6.1'
+APP_VERSION = '1.6.2'
 APP_AUTHOR = 'Rob de Roy'
 
 log = logging.getLogger('hotkey-master')

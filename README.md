@@ -45,9 +45,20 @@
    Die Meldung erscheint, weil der Installer nicht kostenpflichtig signiert ist.
 
 Ohne Installation: unter [Alle Downloads](https://github.com/Wolfram33/hotkeymaster/releases/latest) liegt zusätzlich
-`hotkey-master.exe` zum direkten Starten.
+`Hotkey-Master-portable.zip` – entpacken und `hotkey-master.exe` im Ordner starten.
 
 Ein **Update** installiert man einfach über die vorhandene Version – die Hotkeys bleiben erhalten.
+
+### Virenschutz meldet „Trojan:Win32/Wacatac“?
+
+Das ist ein **Fehlalarm**. Windows Defender stuft per maschinellem Lernen („!ml“) unsignierte Programme,
+die Tastatureingaben überwachen, gelegentlich als verdächtig ein – genau das muss ein Hotkey-Programm aber tun.
+Der komplette Quellcode liegt offen in diesem Repository.
+
+- Bitte **Version 1.6.2 oder neuer** verwenden: Ab dort ist das Programm so gebaut, dass Defender es nicht mehr beanstandet.
+  Die Versionen 1.6.0 und 1.6.1 wurden blockiert und starteten nicht.
+- Tritt die Meldung trotzdem auf, hilft eine Meldung an Microsoft als Fehlalarm:
+  [microsoft.com/wdsi/filesubmission](https://www.microsoft.com/en-us/wdsi/filesubmission) („Incorrectly detected as malware“).
 
 ## So geht's
 
@@ -78,9 +89,9 @@ Voraussetzungen: Windows, [Python 3.12](https://www.python.org/downloads/),
 und für den Installer [Inno Setup 6](https://jrsoftware.org/isdl.php).
 
 ```powershell
-python -m pip install -r requirements.txt nuitka zstandard
+python -m pip install -r requirements.txt nuitka
 python hotkey-master.py        # direkt starten
-pwsh ./build.ps1               # hotkey-master.exe + dist\Hotkey-Master-Setup.exe bauen
+pwsh ./build.ps1               # baut dist\Hotkey-Master\ (Programmordner), das ZIP und den Installer
 ```
 
 ## Neue Version veröffentlichen

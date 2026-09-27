@@ -24,7 +24,7 @@ jobs:
           cache: pip
 
       - name: Abhängigkeiten installieren
-        run: python -m pip install -r requirements.txt nuitka zstandard
+        run: python -m pip install -r requirements.txt nuitka
 
       - name: Version prüfen
         shell: pwsh
@@ -56,4 +56,4 @@ jobs:
           generate_release_notes: true
           files: |
             dist/Hotkey-Master-Setup.exe
-            hotkey-master.exe
+            dist/Hotkey-Master-portable.zip

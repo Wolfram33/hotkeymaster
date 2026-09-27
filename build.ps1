@@ -1,11 +1,18 @@
-# Baut hotkey-master.exe (Nuitka) und den Installer dist\Hotkey-Master-Setup.exe (Inno Setup 6).
+# Baut Hotkey-Master als Programmordner (Nuitka --standalone), daraus
+#   dist\Hotkey-Master\                  der fertige Programmordner
+#   dist\Hotkey-Master-portable.zip      zum Entpacken ohne Installation
+#   dist\Hotkey-Master-Setup.exe         der Installer (Inno Setup 6)
 # Wird lokal und von der GitHub-Action (.github/workflows/release.yml) verwendet.
 #
-#   pwsh ./build.ps1              # .exe + Installer
-#   pwsh ./build.ps1 -SkipSetup   # nur die .exe
+#   pwsh ./build.ps1              # alles
+#   pwsh ./build.ps1 -SkipSetup   # ohne Installer
 #
-# Voraussetzungen: python -m pip install -r requirements.txt nuitka zstandard
+# Voraussetzungen: python -m pip install -r requirements.txt nuitka
 #                  Visual Studio Build Tools (C++), Inno Setup 6 für den Installer
+#
+# Bewusst kein --onefile: Die onefile-Variante entpackt beim Start eine DLL in den
+# Temp-Ordner, und Microsoft Defender hält das zusammen mit dem Tastatur-Hook für
+# einen Trojaner (Fehlalarm "Wacatac.B!ml") und blockiert den Start.
 param([switch]$SkipSetup)
 
 $ErrorActionPreference = 'Stop'
@@ -17,11 +24,11 @@ if (-not $match) { throw 'APP_VERSION in hotkey-master.py nicht gefunden.' }
 $version = $match.Matches[0].Groups[1].Value
 Write-Host "Baue Hotkey-Master $version"
 
-# Außerhalb des Projekts bauen: Virenscanner sperren sonst gern die frische .exe,
-# und Nuitka bricht mit "Failed to add resources ... error code 22" ab.
+# Außerhalb des Projekts bauen, damit Virenscanner-Prüfungen des Projektordners
+# den Build nicht stören
 $buildDir = Join-Path ([IO.Path]::GetTempPath()) 'hotkey-master-build'
 
-python -m nuitka --onefile --output-dir="$buildDir" --assume-yes-for-downloads `
+python -m nuitka --standalone --output-dir="$buildDir" --assume-yes-for-downloads `
     --enable-plugin=pyqt6 --windows-console-mode=disable `
     --windows-icon-from-ico=icon.ico --include-data-file=icon.ico=icon.ico `
     --include-module=win32api --include-module=win32con --include-module=pynput `
@@ -31,8 +38,16 @@ python -m nuitka --onefile --output-dir="$buildDir" --assume-yes-for-downloads `
     --copyright='Copyright 2026 Wolfram Consult GmbH & Co. KG - Apache-2.0' `
     hotkey-master.py
 if ($LASTEXITCODE -ne 0) { throw "Nuitka ist fehlgeschlagen (Exitcode $LASTEXITCODE)." }
-Copy-Item (Join-Path $buildDir 'hotkey-master.exe') . -Force
-Write-Host 'Fertig: hotkey-master.exe'
+
+$appDir = 'dist\Hotkey-Master'
+Remove-Item $appDir -Recurse -Force -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force dist | Out-Null
+Copy-Item (Join-Path $buildDir 'hotkey-master.dist') $appDir -Recurse
+Copy-Item LICENSE, NOTICE $appDir
+Write-Host "Fertig: $appDir\hotkey-master.exe"
+
+Compress-Archive -Path $appDir -DestinationPath 'dist\Hotkey-Master-portable.zip' -Force
+Write-Host 'Fertig: dist\Hotkey-Master-portable.zip'
 
 if ($SkipSetup) { return }
 
