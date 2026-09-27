@@ -32,7 +32,7 @@ import win32api
 import win32con
 
 APP_NAME = 'Hotkey-Master'
-APP_VERSION = '1.6.0'
+APP_VERSION = '1.6.1'
 APP_AUTHOR = 'Rob de Roy'
 
 log = logging.getLogger('hotkey-master')
@@ -180,13 +180,18 @@ def validate_action(action_type, param):
     """Prüft einen Aktions-Parameter; liefert ihn (ggf. normalisiert) zurück."""
     if action_type not in ACTIONS:
         raise ValueError(f'Unbekannte Aktion „{action_type}“.')
-    if not isinstance(param, str) or not param.strip():
+    if not isinstance(param, str):
+        raise ValueError(ACTIONS[action_type]['missing'])
+    if action_type == 'type_text':
+        # Nur Leerraum ist erlaubt – z. B. ein Hotkey für das geschützte Leerzeichen
+        if param == '':
+            raise ValueError(ACTIONS[action_type]['missing'])
+        return param
+    if not param.strip():
         raise ValueError(ACTIONS[action_type]['missing'])
     if action_type == 'custom_keys':
         return normalize_combo(param)
-    if action_type == 'open_program':
-        return param.strip()
-    return param  # Text unverändert lassen, auch führende/folgende Leerzeichen
+    return param.strip()
 
 
 class ActionRunner(QObject):

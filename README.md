@@ -21,7 +21,7 @@
   <img alt="Plattform: Windows 10 und 11" src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078D6">
 </p>
 
-![Hauptfenster von Hotkey-Master mit drei eingerichteten Hotkeys: Strg+Alt+C öffnet den Rechner, Strg+Alt+N tippt eine E-Mail-Signatur, F9 sendet Strg+S](docs/screenshot.png)
+![Hotkey-Master mit vier eingerichteten Hotkeys und daneben die Bildschirm-Tastatur, auf der Strg + Alt + N gewählt ist](docs/hotkeys.jpg)
 
 ## Was kann Hotkey-Master?
 
