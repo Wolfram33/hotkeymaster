@@ -1,0 +1,12 @@
+Hotkey-Master
+Copyright 2026 Wolfram Consult GmbH & Co. KG
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This software uses the following third-party components, which are
+distributed under their own licenses:
+
+- PyQt6 (Riverbank Computing) - GNU General Public License v3
+- Qt 6 (The Qt Company)       - GNU Lesser General Public License v3
+- pynput (Moses Palmér)       - GNU Lesser General Public License v3
+- pywin32 (Mark Hammond)      - Python Software Foundation License

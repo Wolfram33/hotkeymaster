@@ -1,0 +1,59 @@
+# Baut bei jedem Versions-Tag (z. B. v1.6.0) die .exe und den Installer und
+# veröffentlicht beides als GitHub-Release. Der Link
+#   https://github.com/Wolfram33/hotkeymaster/releases/latest/download/Hotkey-Master-Setup.exe
+# zeigt damit immer auf den neuesten Installer.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:   # manuell für die aktuelle APP_VERSION
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Abhängigkeiten installieren
+        run: python -m pip install -r requirements.txt nuitka zstandard
+
+      - name: Version prüfen
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path hotkey-master.py -Pattern "^APP_VERSION = '(\d+\.\d+\.\d+)'").Matches[0].Groups[1].Value
+          if (-not $version) { throw 'APP_VERSION in hotkey-master.py nicht gefunden.' }
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$version") {
+            throw "Tag $env:GITHUB_REF_NAME passt nicht zu APP_VERSION $version in hotkey-master.py."
+          }
+          "VERSION=$version" >> $env:GITHUB_ENV
+
+      - name: Inno Setup bereitstellen
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup -y --no-progress
+          }
+
+      - name: Bauen
+        shell: pwsh
+        run: ./build.ps1
+
+      - name: Release veröffentlichen
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}
+          name: Hotkey-Master ${{ env.VERSION }}
+          make_latest: true
+          generate_release_notes: true
+          files: |
+            dist/Hotkey-Master-Setup.exe
+            hotkey-master.exe

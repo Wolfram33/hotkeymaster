@@ -1,0 +1,21 @@
+# Build-Ergebnisse (werden von build.ps1 / GitHub Actions erzeugt)
+*.exe
+*.build/
+*.dist/
+*.onefile-build/
+dist/
+setup/*.zip
+setup/Hotkey-Master/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Lokales Beiwerk (Notizen, alte Versionen) – siehe inaktiv/LIESMICH.md
+inaktiv/
+
+# Editor
+.vscode/
+.idea/
