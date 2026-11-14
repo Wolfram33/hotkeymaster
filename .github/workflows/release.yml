@@ -2,6 +2,12 @@
 # veröffentlicht beides als GitHub-Release. Der Link
 #   https://github.com/Wolfram33/hotkeymaster/releases/latest/download/Hotkey-Master-Setup.exe
 # zeigt damit immer auf den neuesten Installer.
+#
+# Härtung (11/2026):
+# - Standardrechte nur Lesen; Schreibrecht nur für den Release-Job.
+# - Actions auf Commit-SHA gepinnt (Tags können umgehängt werden, Hashes nicht).
+#   Dependabot (.github/dependabot.yml) hält die Hashes aktuell.
+# - Checkout ohne gespeichertes Token (persist-credentials: false).
 name: Release
 
 on:
@@ -10,15 +16,24 @@ on:
   workflow_dispatch:   # manuell für die aktuelle APP_VERSION
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   release:
     runs-on: windows-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write   # Release anlegen und Dateien hochladen
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.12'
           cache: pip
@@ -47,8 +62,19 @@ jobs:
         shell: pwsh
         run: ./build.ps1
 
+      - name: Prüfsummen erzeugen
+        shell: pwsh
+        run: |
+          $files = 'dist/Hotkey-Master-Setup.exe', 'dist/Hotkey-Master-portable.zip'
+          $lines = foreach ($f in $files) {
+            $h = (Get-FileHash -Algorithm SHA256 $f).Hash.ToLower()
+            "$h  $(Split-Path $f -Leaf)"
+          }
+          Set-Content -Path dist/SHA256SUMS.txt -Value $lines -Encoding ascii
+          Get-Content dist/SHA256SUMS.txt
+
       - name: Release veröffentlichen
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: v${{ env.VERSION }}
           name: Hotkey-Master ${{ env.VERSION }}
@@ -57,3 +83,4 @@ jobs:
           files: |
             dist/Hotkey-Master-Setup.exe
             dist/Hotkey-Master-portable.zip
+            dist/SHA256SUMS.txt
